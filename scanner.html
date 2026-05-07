@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SmartAttend — Scanner</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg:#08080f; --surface:rgba(255,255,255,0.04);
+      --border:rgba(255,255,255,0.08);
+      --cyan:#00f5d4; --purple:#7b5ea7; --purple-lt:#a47fd4;
+      --danger:#ff4d6d; --warn:#ffb347; --success:#00f5d4;
+      --text:#e8e8f0; --muted:#7070a0;
+    }
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;min-height:100vh;display:flex;flex-direction:column}
+    .topbar{display:flex;align-items:center;justify-content:space-between;padding:1rem 1.5rem;background:rgba(0,0,0,0.4);border-bottom:1px solid var(--border);backdrop-filter:blur(20px)}
+    .topbar-brand{font-family:'Space Mono',monospace;font-size:1.1rem;background:linear-gradient(90deg,var(--cyan),var(--purple-lt));-webkit-background-clip:text;-webkit-text-fill-color:transparent;font-weight:700}
+    .session-info{display:flex;align-items:center;gap:1rem;font-family:'Space Mono',monospace;font-size:0.75rem;color:var(--muted)}
+    .session-badge{padding:0.3rem 0.8rem;border-radius:50px;border:1px solid rgba(0,245,212,0.3);background:rgba(0,245,212,0.06);color:var(--cyan);font-size:0.7rem}
+    .session-badge.inactive{border-color:rgba(255,77,109,0.3);background:rgba(255,77,109,0.06);color:var(--danger)}
+    .main{flex:1;display:grid;grid-template-columns:1fr 380px;gap:0}
+    .camera-section{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:1.5rem;background:#040408;border-right:1px solid var(--border)}
+    .video-wrapper{position:relative;width:100%;max-width:640px;border-radius:16px;overflow:hidden;border:2px solid var(--border);background:#000}
+    video,canvas.overlay{width:100%;display:block;border-radius:14px}
+    canvas.overlay{position:absolute;top:0;left:0;height:100%;pointer-events:none}
+    .cam-controls{display:flex;gap:0.75rem;margin-top:1rem;flex-wrap:wrap;justify-content:center}
+    .btn{display:inline-flex;align-items:center;gap:0.4rem;padding:0.65rem 1.3rem;border-radius:10px;font-family:'DM Sans',sans-serif;font-size:0.9rem;font-weight:600;cursor:pointer;border:none;transition:all 0.2s ease}
+    .btn--cyan{background:linear-gradient(135deg,var(--cyan),#00c4aa);color:#080810}
+    .btn--cyan:hover{box-shadow:0 0 20px rgba(0,245,212,0.35)}
+    .btn--purple{background:linear-gradient(135deg,var(--purple),#5d3d8a);color:#fff}
+    .btn--danger{background:linear-gradient(135deg,var(--danger),#cc2244);color:#fff}
+    .btn--ghost{background:rgba(255,255,255,0.05);border:1px solid var(--border);color:var(--muted)}
+    .btn--ghost:hover{background:rgba(255,255,255,0.1);color:var(--text)}
+    .btn:disabled{opacity:0.5;cursor:not-allowed}
+
+    /* Pre-class countdown overlay */
+    .preclass-overlay{
+      position:absolute;inset:0;background:rgba(8,8,15,0.92);backdrop-filter:blur(8px);
+      display:flex;flex-direction:column;align-items:center;justify-content:center;
+      gap:1rem;z-index:10;border-radius:14px
+    }
+    .preclass-overlay.hidden{display:none}
+    .preclass-title{font-family:'Space Mono',monospace;font-size:1rem;color:var(--muted)}
+    .preclass-countdown{font-family:'Space Mono',monospace;font-size:3.5rem;font-weight:700;color:var(--cyan)}
+    .preclass-sub{font-size:0.82rem;color:var(--muted);text-align:center}
+
+    /* Attendance window banner */
+    .window-banner{
+      margin-top:0.75rem;padding:0.6rem 1rem;border-radius:10px;
+      font-size:0.82rem;font-family:'Space Mono',monospace;text-align:center;
+      transition:all 0.3s ease;
+    }
+    .window-open{background:rgba(0,245,212,0.1);border:1px solid rgba(0,245,212,0.35);color:var(--cyan)}
+    .window-closed{background:rgba(255,77,109,0.06);border:1px solid rgba(255,77,109,0.2);color:var(--danger)}
+    .window-pending{background:rgba(255,179,71,0.08);border:1px solid rgba(255,179,71,0.25);color:var(--warn)}
+
+    /* Class end countdown */
+    .class-countdown{margin-top:0.75rem;text-align:center;font-family:'Space Mono',monospace}
+    .class-countdown-label{font-size:0.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em}
+    .class-countdown-val{font-size:2.2rem;color:var(--cyan);margin:0.1rem 0}
+    .class-countdown-bar{width:100%;max-width:320px;height:4px;background:rgba(255,255,255,0.08);border-radius:2px;margin:0.25rem auto 0}
+    .class-countdown-fill{height:100%;background:linear-gradient(90deg,var(--cyan),var(--purple-lt));border-radius:2px;transition:width 1s linear}
+
+    /* Chunk timer */
+    .chunk-timer{margin-top:0.75rem;text-align:center;font-family:'Space Mono',monospace}
+    .chunk-label{font-size:0.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em}
+    .chunk-value{font-size:1.6rem;color:var(--purple-lt);margin:0.2rem 0}
+    .chunk-progress{width:100%;max-width:320px;height:3px;background:rgba(255,255,255,0.08);border-radius:2px;margin:0 auto}
+    .chunk-progress-bar{height:100%;background:var(--purple-lt);border-radius:2px;transition:width 1s linear}
+
+    /* Sidebar */
+    .sidebar{display:flex;flex-direction:column;overflow-y:auto;background:rgba(0,0,0,0.3)}
+    .sidebar-header{padding:1.25rem 1.25rem 0.75rem;border-bottom:1px solid var(--border);font-family:'Space Mono',monospace;font-size:0.85rem;color:var(--muted);display:flex;align-items:center;justify-content:space-between}
+    .detected-count{background:rgba(0,245,212,0.1);border:1px solid rgba(0,245,212,0.2);border-radius:50px;padding:0.2rem 0.6rem;font-size:0.75rem;color:var(--cyan)}
+    .student-list{flex:1;padding:0.75rem;display:flex;flex-direction:column;gap:0.5rem}
+    .student-card{background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:12px;padding:0.9rem 1rem;display:flex;align-items:center;gap:0.9rem;transition:all 0.2s ease;animation:slideIn 0.3s ease}
+    @keyframes slideIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
+    .avatar{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--cyan),var(--purple));display:flex;align-items:center;justify-content:center;font-size:1rem;font-weight:700;color:#08080f;flex-shrink:0}
+    .student-info{flex:1;min-width:0}
+    .student-name{font-weight:600;font-size:0.9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .student-roll{font-size:0.75rem;color:var(--muted);font-family:'Space Mono',monospace}
+    .behavior-badge{padding:0.2rem 0.6rem;border-radius:50px;font-size:0.7rem;font-family:'Space Mono',monospace;text-transform:uppercase;flex-shrink:0}
+    .beh-focused{background:rgba(0,245,212,0.1);color:var(--cyan);border:1px solid rgba(0,245,212,0.25)}
+    .beh-distracted{background:rgba(255,179,71,0.1);color:var(--warn);border:1px solid rgba(255,179,71,0.25)}
+    .beh-phone{background:rgba(255,77,109,0.1);color:var(--danger);border:1px solid rgba(255,77,109,0.25)}
+    .beh-unknown{background:rgba(128,128,128,0.1);color:var(--muted);border:1px solid rgba(128,128,128,0.2)}
+    .eligible-tag{font-size:0.65rem;color:var(--cyan);font-family:'Space Mono',monospace;margin-top:0.15rem}
+
+    /* Chunk pips */
+    .chunks-section{padding:0.75rem;border-top:1px solid var(--border)}
+    .chunks-title{font-family:'Space Mono',monospace;font-size:0.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:0.5rem}
+    .chunks-grid{display:flex;flex-wrap:wrap;gap:0.4rem}
+    .chunk-pip{width:28px;height:28px;border-radius:6px;background:rgba(255,255,255,0.06);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:0.65rem;font-family:'Space Mono',monospace;color:var(--muted)}
+    .chunk-pip.done{background:rgba(0,245,212,0.15);border-color:rgba(0,245,212,0.4);color:var(--cyan)}
+    .chunk-pip.active{background:rgba(123,94,167,0.2);border-color:var(--purple);color:var(--purple-lt);animation:pipPulse 1s ease-in-out infinite}
+    @keyframes pipPulse{0%,100%{box-shadow:0 0 0 0 rgba(123,94,167,0.4)}50%{box-shadow:0 0 0 4px rgba(123,94,167,0)}}
+
+    /* No session overlay */
+    .no-session{position:absolute;inset:0;background:rgba(8,8,15,0.85);backdrop-filter:blur(8px);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1rem;z-index:10;border-radius:16px}
+    .no-session.hidden{display:none}
+    .no-session h3{font-family:'Space Mono',monospace;font-size:1.1rem;color:var(--muted)}
+    .no-session p{font-size:0.85rem;color:var(--muted);opacity:0.6;text-align:center}
+  </style>
+</head>
+<body>
+
+  <div class="topbar">
+    <div class="topbar-brand">📷 SmartAttend Scanner</div>
+    <div class="session-info">
+      <span id="sessionSubject" style="color:var(--text)">—</span>
+      <span class="session-badge inactive" id="sessionBadge">No Session</span>
+      <span id="clockEl">—</span>
+    </div>
+    <a href="/" class="btn btn--ghost" style="font-size:0.8rem;">← Home</a>
+  </div>
+
+  <div class="main">
+    <!-- Camera Section -->
+    <div class="camera-section">
+      <div class="video-wrapper">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="overlay" class="overlay"></canvas>
+
+        <!-- Pre-class countdown overlay (shown 10s before class) -->
+        <div class="preclass-overlay hidden" id="preclassOverlay">
+          <div class="preclass-title">⏳ Class Starting Soon</div>
+          <div class="preclass-countdown" id="preclassCountdown">10</div>
+          <div class="preclass-sub">Camera will start automatically<br>Attendance window opens in a few minutes</div>
+        </div>
+
+        <!-- No session overlay -->
+        <div class="no-session" id="noSessionOverlay">
+          <div style="font-size:3rem">🔒</div>
+          <h3>No Active Session</h3>
+          <p>An admin must start a session<br>from the Admin Dashboard first.</p>
+        </div>
+      </div>
+
+      <!-- Attendance window banner -->
+      <div class="window-banner window-pending" id="windowBanner" style="display:none;">
+        ⏳ Attendance window pending...
+      </div>
+
+      <!-- Class end countdown -->
+      <div class="class-countdown" id="classCountdownEl" style="display:none;">
+        <div class="class-countdown-label">Class ends in</div>
+        <div class="class-countdown-val" id="classCountdownVal">--:--</div>
+        <div class="class-countdown-bar">
+          <div class="class-countdown-fill" id="classCountdownFill" style="width:100%"></div>
+        </div>
+      </div>
+
+      <div class="cam-controls">
+        <button class="btn btn--cyan" id="startCamBtn" onclick="startCamera()">📹 Start Camera</button>
+        <button class="btn btn--ghost" id="stopCamBtn" onclick="stopCamera()" disabled>⏹ Stop</button>
+        <button class="btn btn--danger" id="endSessionBtn" onclick="endSession()" disabled>🔴 End Session</button>
+      </div>
+
+      <!-- Chunk Timer -->
+      <div class="chunk-timer">
+        <div class="chunk-label">Next Chunk In</div>
+        <div class="chunk-value" id="timerDisplay">--:--</div>
+        <div class="chunk-progress">
+          <div class="chunk-progress-bar" id="timerBar" style="width:0%"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sidebar -->
+    <div class="sidebar">
+      <div class="sidebar-header">
+        <span>Detected Students</span>
+        <span class="detected-count" id="detectedCount">0</span>
+      </div>
+      <div class="student-list" id="studentList">
+        <div style="text-align:center;color:var(--muted);font-size:0.85rem;padding:2rem;">Camera not active</div>
+      </div>
+      <div class="chunks-section">
+        <div class="chunks-title">Chunks Progress</div>
+        <div class="chunks-grid" id="chunksGrid"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let stream         = null;
+    let sessionActive  = false;
+    let sessionData    = { sessionId:null, classId:null, subject:null, chunkTimes:[], classDuration:50,
+                           secsRemaining:null, windowOpenISO:null, windowCloseISO:null,
+                           startTimeStr:null, endTimeStr:null };
+    let chunkIndex     = 0;
+    let chunkTimer     = null;
+    let frameInterval  = null;
+    let autoEndTimer   = null;
+    let chunkIntervalSec = 300;
+    let classTotalSecs = 0;
+    let classStartSecs = null;
+    let windowEligibleRolls = new Set();
+
+    const video   = document.getElementById('video');
+    const overlay = document.getElementById('overlay');
+    const ctx     = overlay.getContext('2d');
+
+    // Clock
+    setInterval(() => {
+      document.getElementById('clockEl').textContent = new Date().toLocaleTimeString();
+    }, 1000);
+
+    // ── Session check on load ──
+    async function checkSession() {
+      try {
+        const res  = await fetch('/admin/active-session');
+        const data = await res.json();
+        if (data.active) {
+          sessionData = {
+            sessionId:      data.sessionId,
+            classId:        data.classId,
+            subject:        data.subject,
+            chunkTimes:     data.chunkTimes || [],
+            classDuration:  data.classDuration || 50,
+            secsRemaining:  data.secsRemaining,
+            windowOpenISO:  data.windowOpenISO,
+            windowCloseISO: data.windowCloseISO,
+          };
+          sessionActive = true;
+
+          document.getElementById('sessionSubject').textContent = data.subject || 'Active Session';
+          document.getElementById('sessionBadge').textContent   = '● Live';
+          document.getElementById('sessionBadge').classList.remove('inactive');
+          document.getElementById('noSessionOverlay').classList.add('hidden');
+          document.getElementById('endSessionBtn').disabled = false;
+
+          buildChunkPips();
+          initCountdowns();
+          updateWindowBanner();
+
+          // Check if camera should auto-start (10s before class — handled in scheduleAutoStart)
+          // If session already active, just enable the button
+          document.getElementById('startCamBtn').disabled = false;
+        }
+      } catch(e) { console.error('Session check failed', e); }
+    }
+    checkSession();
+
+    // ── Pre-class auto-start logic ──
+    function scheduleAutoStart(windowOpenISO) {
+      if (!windowOpenISO) return;
+      const windowOpenMs = new Date(windowOpenISO).getTime();
+      // Camera auto-starts 10 seconds before the window opens
+      const autoStartMs  = windowOpenMs - 10000;
+      const msUntil      = autoStartMs - Date.now();
+
+      if (msUntil <= 0) {
+        // Already past auto-start time, start immediately if session active
+        if (sessionActive && !stream) startCamera();
+        return;
+      }
+
+      // Show preclass countdown
+      const overlay = document.getElementById('preclassOverlay');
+      const countEl = document.getElementById('preclassCountdown');
+
+      if (msUntil <= 30000) {
+        // Show countdown if within 30 seconds
+        overlay.classList.remove('hidden');
+        let secs = Math.ceil(msUntil / 1000);
+        countEl.textContent = secs;
+        const cid = setInterval(() => {
+          secs--;
+          countEl.textContent = secs;
+          if (secs <= 0) {
+            clearInterval(cid);
+            overlay.classList.add('hidden');
+            if (sessionActive && !stream) startCamera();
+          }
+        }, 1000);
+      } else {
+        // Schedule it for later
+        setTimeout(() => { scheduleAutoStart(windowOpenISO); }, msUntil - 30000);
+      }
+    }
+
+    function initCountdowns() {
+      classTotalSecs = sessionData.classDuration * 60;
+
+      // Countdown ticker
+      setInterval(() => {
+        if (!sessionActive) return;
+        updateWindowBanner();
+
+        // Class end countdown
+        if (sessionData.secsRemaining !== null) {
+          const now    = Date.now();
+          if (!classStartSecs) classStartSecs = now;
+          const elapsed = Math.floor((now - classStartSecs) / 1000);
+          const remaining = Math.max(0, sessionData.secsRemaining - elapsed);
+
+          document.getElementById('classCountdownEl').style.display = 'block';
+          const m = String(Math.floor(remaining / 60)).padStart(2,'0');
+          const s = String(remaining % 60).padStart(2,'0');
+          document.getElementById('classCountdownVal').textContent = `${m}:${s}`;
+
+          // Progress bar (fills as class progresses)
+          const pct = Math.min(100, (elapsed / classTotalSecs) * 100);
+          document.getElementById('classCountdownFill').style.width = (100 - pct) + '%';
+
+          if (remaining <= 0 && sessionActive) {
+            endSession(true);
+          }
+        }
+      }, 1000);
+
+      // Schedule auto-camera start
+      if (sessionData.windowOpenISO) {
+        scheduleAutoStart(sessionData.windowOpenISO);
+      }
+    }
+
+    function updateWindowBanner() {
+      if (!sessionActive) return;
+      const banner = document.getElementById('windowBanner');
+      banner.style.display = 'block';
+
+      if (!sessionData.windowOpenISO || !sessionData.windowCloseISO) {
+        banner.style.display = 'none';
+        return;
+      }
+
+      const now       = Date.now();
+      const openMs    = new Date(sessionData.windowOpenISO).getTime();
+      const closeMs   = new Date(sessionData.windowCloseISO).getTime();
+
+      if (now < openMs) {
+        const secsUntil = Math.ceil((openMs - now) / 1000);
+        const m = String(Math.floor(secsUntil/60)).padStart(2,'0');
+        const s = String(secsUntil%60).padStart(2,'0');
+        banner.className = 'window-banner window-pending';
+        banner.textContent = `⏳ Attendance window opens in ${m}:${s}`;
+      } else if (now <= closeMs) {
+        const secsLeft = Math.ceil((closeMs - now) / 1000);
+        banner.className = 'window-banner window-open';
+        banner.textContent = `🟢 ATTENDANCE WINDOW OPEN — closes in ${secsLeft}s`;
+      } else {
+        banner.className = 'window-banner window-closed';
+        banner.textContent = `🔒 Attendance window closed at ${new Date(closeMs).toLocaleTimeString()}`;
+      }
+    }
+
+    // ── Camera ──
+    async function startCamera() {
+      if (!sessionActive) {
+        alert('No active session. Ask admin to start a session first.');
+        return;
+      }
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode:'user', width:640, height:480 }
+        });
+        video.srcObject = stream;
+        video.onloadedmetadata = () => {
+          overlay.width  = video.videoWidth;
+          overlay.height = video.videoHeight;
+        };
+
+        document.getElementById('startCamBtn').disabled = true;
+        document.getElementById('stopCamBtn').disabled  = false;
+        document.getElementById('endSessionBtn').disabled = false;
+
+        // Send frames every 800ms
+        frameInterval = setInterval(sendFrame, 800);
+
+        // Chunk interval
+        const times = sessionData.chunkTimes;
+        chunkIntervalSec = times.length >= 2 ? (times[1] - times[0]) * 60 : 5 * 60;
+        startChunkCountdown();
+
+      } catch(e) {
+        alert('Camera access denied: ' + e.message);
+      }
+    }
+
+    function stopCamera() {
+      if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+      clearInterval(frameInterval);
+      clearInterval(chunkTimer);
+      if (autoEndTimer) { clearTimeout(autoEndTimer); autoEndTimer = null; }
+      video.srcObject = null;
+      ctx.clearRect(0, 0, overlay.width, overlay.height);
+      document.getElementById('startCamBtn').disabled = false;
+      document.getElementById('stopCamBtn').disabled  = true;
+      document.getElementById('studentList').innerHTML =
+        '<div style="text-align:center;color:var(--muted);font-size:0.85rem;padding:2rem;">Camera stopped</div>';
+      document.getElementById('detectedCount').textContent = '0';
+    }
+
+    // ── Frame sending ──
+    async function sendFrame() {
+      if (!stream || !sessionActive) return;
+      const canvas = document.createElement('canvas');
+      canvas.width  = video.videoWidth  || 640;
+      canvas.height = video.videoHeight || 480;
+      canvas.getContext('2d').drawImage(video, 0, 0);
+      const b64 = canvas.toDataURL('image/jpeg', 0.7);
+
+      try {
+        const res  = await fetch('/scanner/frame', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ frame: b64 })
+        });
+        const data = await res.json();
+
+        // Track window-eligible students
+        if (data.windowOpen && data.detected) {
+          data.detected.forEach(d => windowEligibleRolls.add(d.rollNo));
+        }
+
+        renderDetections(data.detected || [], data.windowOpen);
+      } catch(e) { /* network hiccup */ }
+    }
+
+    // ── Render detections ──
+    function renderDetections(detected, windowOpen) {
+      const list = document.getElementById('studentList');
+      document.getElementById('detectedCount').textContent = detected.length;
+      ctx.clearRect(0, 0, overlay.width, overlay.height);
+
+      if (detected.length === 0) {
+        list.innerHTML = '<div style="text-align:center;color:var(--muted);font-size:0.85rem;padding:2rem;">No faces detected</div>';
+        return;
+      }
+
+      list.innerHTML = detected.map(d => {
+        const behClass = {focused:'beh-focused', distracted:'beh-distracted', phone:'beh-phone'}[d.behavior] || 'beh-unknown';
+        const behIcon  = {focused:'✅', distracted:'👀', phone:'📵'}[d.behavior] || '❓';
+        const eligible = windowEligibleRolls.has(d.rollNo);
+        return `
+          <div class="student-card">
+            <div class="avatar">${(d.name||'?').charAt(0).toUpperCase()}</div>
+            <div class="student-info">
+              <div class="student-name">${d.name}</div>
+              <div class="student-roll">${d.rollNo}</div>
+              ${eligible ? '<div class="eligible-tag">✓ Window Eligible</div>' : ''}
+            </div>
+            <span class="behavior-badge ${behClass}">${behIcon} ${d.behavior}</span>
+          </div>`;
+      }).join('');
+
+      // Draw face boxes
+      detected.forEach(d => {
+        if (!d.location) return;
+        const [top, right, bottom, left] = d.location;
+        const colorMap = {focused:'#00f5d4', distracted:'#ffb347', phone:'#ff4d6d', unknown:'#888'};
+        const color = colorMap[d.behavior] || '#888';
+        const eligible = windowEligibleRolls.has(d.rollNo);
+
+        // Face box
+        ctx.strokeStyle = color;
+        ctx.lineWidth   = eligible ? 3 : 2;
+        ctx.shadowColor = color;
+        ctx.shadowBlur  = 12;
+        ctx.strokeRect(left, top, right - left, bottom - top);
+
+        // Corner indicators for eligible students
+        if (eligible) {
+          ctx.fillStyle = color;
+          ctx.font = 'bold 9px monospace';
+          ctx.shadowBlur = 0;
+          ctx.fillText('✓ ELIGIBLE', left, top - 22);
+        }
+
+        // Label
+        ctx.shadowBlur  = 0;
+        ctx.fillStyle   = color + 'cc';
+        ctx.font        = 'bold 11px monospace';
+        const label     = `${d.name} · ${d.behavior}`;
+        const tw        = ctx.measureText(label).width;
+        ctx.fillRect(left, top - 18, tw + 10, 18);
+        ctx.fillStyle = '#000';
+        ctx.fillText(label, left + 5, top - 4);
+      });
+    }
+
+    // ── Chunk timer ──
+    function startChunkCountdown() {
+      let chunkStart  = Date.now();
+      let nextChunkMs = chunkIntervalSec * 1000;
+
+      chunkTimer = setInterval(async () => {
+        const elapsed   = Date.now() - chunkStart;
+        const remaining = nextChunkMs - elapsed;
+
+        if (remaining <= 0) {
+          await saveChunk();
+          chunkStart  = Date.now();
+          nextChunkMs = chunkIntervalSec * 1000;
+        }
+
+        const secs = Math.max(0, Math.ceil(remaining / 1000));
+        const m    = String(Math.floor(secs / 60)).padStart(2,'0');
+        const s    = String(secs % 60).padStart(2,'0');
+        document.getElementById('timerDisplay').textContent = `${m}:${s}`;
+        const pct = Math.min(100, ((nextChunkMs - remaining) / nextChunkMs) * 100);
+        document.getElementById('timerBar').style.width = pct + '%';
+      }, 500);
+    }
+
+    async function saveChunk() {
+      try {
+        await fetch('/scanner/save-chunk', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ chunkIndex })
+        });
+        markChunkDone(chunkIndex);
+        chunkIndex++;
+      } catch(e) { console.error('Chunk save failed', e); }
+    }
+
+    function buildChunkPips() {
+      const grid  = document.getElementById('chunksGrid');
+      const times = sessionData.chunkTimes;
+      grid.innerHTML = times.map((t, i) =>
+        `<div class="chunk-pip" id="pip${i}" title="${t} min">${t}</div>`
+      ).join('');
+      if (times.length > 0) document.getElementById('pip0')?.classList.add('active');
+    }
+
+    function markChunkDone(idx) {
+      const pip = document.getElementById('pip' + idx);
+      if (pip) { pip.classList.remove('active'); pip.classList.add('done'); }
+      const next = document.getElementById('pip' + (idx + 1));
+      if (next) next.classList.add('active');
+    }
+
+    // ── End session ──
+    async function endSession(auto = false) {
+      if (!auto && !confirm('End this attendance session? Final results will be calculated.')) return;
+
+      if (chunkIndex < sessionData.chunkTimes.length) {
+        await saveChunk();
+      }
+      stopCamera();
+
+      try {
+        const res  = await fetch('/scanner/end-session', { method:'POST' });
+        const data = await res.json();
+        if (data.success) {
+          const msg = auto ? '⏰ Session auto-ended. Final attendance saved!' : '✅ Session ended. Final attendance saved!';
+          alert(msg);
+          sessionActive = false;
+          document.getElementById('sessionBadge').textContent = 'Ended';
+          document.getElementById('sessionBadge').classList.add('inactive');
+          document.getElementById('endSessionBtn').disabled = true;
+          document.getElementById('noSessionOverlay').classList.remove('hidden');
+          document.getElementById('classCountdownEl').style.display = 'none';
+          document.getElementById('windowBanner').style.display = 'none';
+        }
+      } catch(e) { alert('Error ending session: ' + e.message); }
+    }
+  </script>
+</body>
+</html>
